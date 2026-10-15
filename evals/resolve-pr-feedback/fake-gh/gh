@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Fake gh for resolve-pr-feedback's scripts. Logs argv to $FAKE_GH_LOG and
+# answers from canned JSON keyed by the GraphQL operation name or REST path.
+# FAKE_GH_PENDING=1 makes the reviews listing report a PENDING review.
+
+printf '%s\n' "$*" >> "${FAKE_GH_LOG:-/dev/null}"
+args="$*"
+
+case "$args" in
+  "repo view"*) echo "acme"; exit 0 ;;
+esac
+
+case "$args" in
+  *"query Threads"*)
+    cat <<'EOF'
+[{"data":{"repository":{"pullRequest":{"author":{"login":"dev"},"reviewThreads":{"nodes":[
+ {"id":"PRRT_open","isResolved":false,"isOutdated":false,"path":"a.py","line":3,"originalLine":3,"startLine":null,"originalStartLine":null,
+  "comments":{"nodes":[{"id":"PRRC_1","author":{"login":"rev"},"body":"rename x","createdAt":"2026-01-01T00:00:00Z","url":"https://github.com/acme/web/pull/7#discussion_r101"}]}},
+ {"id":"PRRT_done","isResolved":true,"isOutdated":false,"path":"b.py","line":1,"originalLine":1,"startLine":null,"originalStartLine":null,
+  "comments":{"nodes":[{"id":"PRRC_2","author":{"login":"rev"},"body":"ok","createdAt":"2026-01-01T00:00:00Z","url":"https://github.com/acme/web/pull/7#discussion_r102"}]}}
+],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]
+EOF
+    exit 0 ;;
+  *"query Comments"*)
+    cat <<'EOF'
+[{"data":{"repository":{"pullRequest":{"comments":{"nodes":[
+ {"id":"IC_1","author":{"login":"dev"},"body":"please rename check_id"},
+ {"id":"IC_2","author":{"login":"bot"},"body":"   "}
+],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]
+EOF
+    exit 0 ;;
+  *"query Reviews"*)
+    state="COMMENTED"; [ "${FAKE_GH_PENDING:-0}" = 1 ] && state="PENDING"
+    cat <<EOF
+[{"data":{"viewer":{"login":"me"},"repository":{"pullRequest":{"reviews":{"nodes":[
+ {"id":"PRR_1","author":{"login":"me"},"body":"","state":"$state"},
+ {"id":"PRR_2","author":{"login":"rev"},"body":"Looks mostly fine; one ask inline.","state":"COMMENTED"}
+],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]
+EOF
+    exit 0 ;;
+  *"mutation ResolveReviewThread"*)
+    echo '{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_open","isResolved":true}}}}'; exit 0 ;;
+  *"--method POST"*"/replies"*)
+    echo '{"id":201,"html_url":"https://github.com/acme/web/pull/7#discussion_r201"}'; exit 0 ;;
+  *"/reviews"*"PENDING"*)
+    [ "${FAKE_GH_PENDING:-0}" = 1 ] && echo 9001
+    exit 0 ;;
+esac
+
+echo "fake gh: unhandled: $args" >&2
+exit 1

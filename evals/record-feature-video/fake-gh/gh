@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# A stub gh for evals/record-feature-video/check-helpers.sh. No network.
+#
+# Env:
+#   FAKE_GH_VERSION     version `gh --version` reports (default 2.102.0); below
+#                       2.99 the `pr edit --help` text has no --attach
+#   FAKE_GH_NO_ATTACH=1 drop --attach from `pr edit --help` at any version
+#   FAKE_GH_PR          the current branch's PR number; empty = no PR
+#   FAKE_GH_BODY        file holding the PR body; `pr edit --body-file` writes it
+#   FAKE_GH_TITLE / _HEAD / _BASE / _STATE / _URL   PR fields for `pr view --json`
+#   FAKE_GH_FILES       newline-separated changed paths (the `files` field)
+#   FAKE_GH_ARGV_LOG    append each call's argv here, one line per call
+#   FAKE_GH_REWRITE     real (default): rewrite attached paths the way gh
+#                       v2.102.0 does; fail: store the body verbatim, as if the
+#                       upload happened but no reference was rewritten
+#   FAKE_GH_EDIT_EXIT   exit status for `pr edit` (default 0)
+#
+# The `real` rewrite mirrors cli/cli internal/attachments/references.go: only a
+# markdown reference ![alt](path) or [text](path) whose path is the attached
+# file is rewritten. An image keeps its label and gets the asset URL. A video
+# embed alone in its paragraph becomes the bare URL (the player); elsewhere it
+# degrades to [label](URL). An attached file nothing references is appended as
+# its own paragraph. A video attached with "#alt" is refused, as gh refuses it.
+# Asset URLs are https://github.com/user-attachments/assets/fake-<n>.
+
+set -uo pipefail
+
+if [ -n "${FAKE_GH_ARGV_LOG:-}" ]; then
+  { printf 'gh'; for a in "$@"; do printf ' %q' "$a"; done; printf '\n'; } >> "$FAKE_GH_ARGV_LOG"
+fi
+
+VERSION="${FAKE_GH_VERSION:-2.102.0}"
+die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+
+new_enough() {
+  local maj="${VERSION%%.*}" rest="${VERSION#*.}"
+  local min="${rest%%.*}"
+  [ "$maj" -gt 2 ] || { [ "$maj" -eq 2 ] && [ "$min" -ge 99 ]; }
+}
+
+pr_json() {  # pr_json <number>
+  local files='[]'
+  if [ -n "${FAKE_GH_FILES:-}" ]; then
+    files="$(printf '%s\n' "$FAKE_GH_FILES" | jq -R 'select(length>0) | {path: .}' | jq -s '.')"
+  fi
+  jq -n --argjson number "$1" --arg title "${FAKE_GH_TITLE:-Fake PR}" \
+    --arg head "${FAKE_GH_HEAD:-feature}" --arg base "${FAKE_GH_BASE:-main}" \
+    --arg state "${FAKE_GH_STATE:-OPEN}" --arg url "${FAKE_GH_URL:-https://github.com/acme/app/pull/$1}" \
+    --rawfile body "${FAKE_GH_BODY:-/dev/null}" --argjson files "$files" \
+    '{number:$number,title:$title,headRefName:$head,baseRefName:$base,state:$state,url:$url,body:$body,files:$files}'
+}
+
+case "${1:-}" in
+  --version)
+    printf 'gh version %s (2026-09-30)\nhttps://github.com/cli/cli/releases/tag/v%s\n' "$VERSION" "$VERSION"
+    exit 0 ;;
+  pr) shift ;;
+  *) die "fake gh: unsupported command: $*" ;;
+esac
+
+sub="${1:-}"; shift || true
+
+if [ "$sub" = edit ] && [ "${1:-}" = --help ]; then
+  printf 'Edit a pull request.\n\nFLAGS\n'
+  if new_enough && [ "${FAKE_GH_NO_ATTACH:-0}" != 1 ]; then
+    printf "      --attach file             Attach an image or video file, in '<file>#<image alt text>' format\n"
+  fi
+  printf '  -F, --body-file file          Read body text from file\n'
+  exit 0
+fi
+
+NUM=''; JSON=''; JQ=''; BODY_FILE=''; ATTACH=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) JSON="$2"; shift 2 ;;
+    -q|--jq) JQ="$2"; shift 2 ;;
+    -F|--body-file) BODY_FILE="$2"; shift 2 ;;
+    --attach) ATTACH+=("$2"); shift 2 ;;
+    -*) die "fake gh: unsupported flag: $1" ;;
+    *) NUM="$1"; shift ;;
+  esac
+done
+
+if [ -z "$NUM" ]; then
+  [ -n "${FAKE_GH_PR:-}" ] || die 'no pull requests found for branch "feature"'
+  NUM="$FAKE_GH_PR"
+elif [ -n "${FAKE_GH_PR:-}" ] && [ "$NUM" != "$FAKE_GH_PR" ]; then
+  die "GraphQL: Could not resolve to a PullRequest with the number of $NUM."
+elif [ -z "${FAKE_GH_PR:-}" ]; then
+  die "GraphQL: Could not resolve to a PullRequest with the number of $NUM."
+fi
+
+case "$sub" in
+  view)
+    [ -n "$JSON" ] || die "fake gh: pr view needs --json"
+    if [ -n "$JQ" ]; then pr_json "$NUM" | jq -r "$JQ"; else pr_json "$NUM"; fi
+    exit $? ;;
+  edit)
+    [ -n "$BODY_FILE" ] || die "fake gh: pr edit needs --body-file"
+    [ -n "${FAKE_GH_BODY:-}" ] || die "fake gh: FAKE_GH_BODY unset"
+    [ "${FAKE_GH_EDIT_EXIT:-0}" = 0 ] || die "HTTP 422: upload failed (fake)" "$FAKE_GH_EDIT_EXIT"
+    python3 - "$BODY_FILE" "$FAKE_GH_BODY" "${FAKE_GH_REWRITE:-real}" ${ATTACH[@]+"${ATTACH[@]}"} <<'PY' || exit $?
+import os, re, sys
+src, dst, mode, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+body = open(src).read()
+counter = dst + ".n"
+n = int(open(counter).read()) if os.path.exists(counter) else 0
+VIDEO = (".mp4", ".mov", ".webm")
+for arg in args:
+    path, alt = arg, ""
+    if not os.path.exists(arg) and "#" in arg:
+        path, alt = arg.rsplit("#", 1)
+    if not os.path.exists(path):
+        sys.exit(f"{path}: no such file")
+    path = os.path.abspath(path)
+    video = path.lower().endswith(VIDEO)
+    if video and alt:
+        sys.exit("cannot set alt text on video")
+    if not alt:
+        base = os.path.basename(path)
+        alt = base if video else os.path.splitext(base)[0].replace(".", " ")
+    n += 1
+    url = f"https://github.com/user-attachments/assets/fake-{n}"
+    if mode == "fail":
+        continue
+    pat = re.compile(r"(!?)\[([^\]]*)\]\((?:<" + re.escape(path) + r">|" + re.escape(path) + r")\)")
+    lines = body.split("\n")
+    found = False
+    for i, line in enumerate(lines):
+        m = pat.search(line)
+        if not m:
+            continue
+        found = True
+        bang, label = m.group(1), m.group(2)
+        if video and bang:
+            prev_ok = i == 0 or not lines[i - 1].strip() or re.match(r"^\s*<!--.*-->\s*$", lines[i - 1])
+            next_ok = i == len(lines) - 1 or not lines[i + 1].strip()
+            if line.strip() == m.group(0) and prev_ok and next_ok:
+                lines[i] = line.replace(m.group(0), url)
+            else:
+                lines[i] = line.replace(m.group(0), "[%s](%s)" % (label or alt, url))
+        else:
+            lines[i] = line.replace(m.group(0), "%s[%s](%s)" % (bang, label, url))
+    body = "\n".join(lines)
+    if not found:
+        body = body.rstrip("\n") + "\n\n" + (url if video else "![%s](%s)" % (alt, url)) + "\n"
+open(dst, "w").write(body)
+open(counter, "w").write(str(n))
+PY
+    printf '%s\n' "${FAKE_GH_URL:-https://github.com/acme/app/pull/$NUM}"
+    exit 0 ;;
+  *) die "fake gh: unsupported: pr $sub" ;;
+esac

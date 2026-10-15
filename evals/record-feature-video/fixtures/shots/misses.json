@@ -1,0 +1,8 @@
+{"baseUrl":"http://localhost:8765","frames":{"app":"iframe#app"},"actions":[
+ {"type":"goto","url":"/index.html"},{"type":"waitFor","frame":"app","selector":"#inc"},{"type":"mark"},
+ {"type":"click","frame":"app","selector":"#increment-button","note":"increment counter"},
+ {"type":"click","frame":"app","selector":"#locked-btn","hasText":"Locked"},
+ {"type":"click","frame":"app","selector":"#inc"},
+ {"type":"scroll","frame":"app","to":"#row-10","block":"start","offset":-40,"note":"cleared below the sticky bar, then 40px back under it"},
+ {"type":"click","frame":"app","selector":"#row-10","scrollIntoView":false,"note":"row under the sticky bar"}],
+ "output":{"name":"misses"}}

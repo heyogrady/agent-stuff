@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""Get CodeRabbit to review a PR's current head, without posting a comment.
+
+CodeRabbit skips most draft PRs, and pauses reviews on a busy branch. Either
+way it leaves a checkbox in its own status comment; ticking that box (an edit
+to CodeRabbit's comment) starts a review. This helper reads where CodeRabbit
+stands on the head commit and ticks the box when one is offered.
+
+Usage:
+  coderabbit-tick --repo [HOST/]OWNER/REPO --pr N [--wait SECONDS]
+                  [--ledger PATH] [--max-per-head 2] [--dry-run]
+
+Prints one JSON object. `state` is one of:
+  ticked          a review box was ticked; a review is now starting
+  reviewing       CodeRabbit is reviewing the head
+  reviewed        CodeRabbit finished a review of the head
+  no-new-files    nothing new since CodeRabbit's last review; that verdict stands
+  rate-limited    out of included reviews; `billable` is true when only a paid
+                  on-demand review is offered (this helper never ticks it)
+  paused-by-human someone paused CodeRabbit on purpose; the helper leaves it paused
+  tick-cap        the box was already ticked --max-per-head times for this head
+  skipped         CodeRabbit skipped the head and offers no box to tick
+  failed          CodeRabbit's status on the head is error or failure
+  no-reaction     no CodeRabbit verdict on the head NO_REACTION_SECONDS after first seen
+  waiting         CodeRabbit has not reacted to the head yet
+  absent          CodeRabbit is not active on this PR
+  error           a gh call failed or returned something unreadable (exit status 1)
+
+--wait polls (every 15 s) until CodeRabbit reacts to the head or the time is
+up. Use it right after a push, when the skip comment has not landed yet. The
+caller's shell timeout must exceed --wait plus about a minute.
+
+--ledger (a JSON file in the babysit state dir) carries per-head tick counts
+and first-seen times across invocations; without it the tick cap and the
+no-reaction cap are not enforced.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+
+LOGIN = "coderabbitai[bot]"
+CONTEXT = "CodeRabbit"
+POLL_SECONDS = 15
+# A PR this old with no CodeRabbit activity is on a repo without CodeRabbit.
+ABSENT_AFTER_SECONDS = 600
+# Matches babysit's ceiling for a review that is still coming.
+NO_REACTION_SECONDS = 1800
+
+# The boxes that start a free review: the draft skip ("Trigger a manual
+# review") and a paused branch ("Resume reviews", "Trigger review"). Nothing
+# else in that comment is ever ticked: "Autopilot" and "Fix CodeRabbit
+# comments" make CodeRabbit push code, "Run on-demand review" bills per file,
+# "Ask an admin" requests billing, and "Check again" after "No files to
+# review" only burns quota on a verdict that already stands.
+TICK_RE = re.compile(
+    r"^((?:> ?)*[-*] )\[ \]( (?![^\n]*(?:on-demand|Autopilot))[^\n]*"
+    r"(?:Trigger a manual review|Resume reviews|Trigger review)[^\n]*)$",
+    re.M,
+)
+RESUME_RE = re.compile(r"Resume reviews")
+ON_DEMAND_RE = re.compile(r"^(?:> ?)*[-*] \[ \][^\n]*Run on-demand review", re.M)
+LIMIT_RE = re.compile(r"(?i)rate.?limit|review limit|usage limit")
+NO_FILES_RE = re.compile(r"No files to review|No new commits to review")
+PAUSED_RE = re.compile(r"Reviews paused")
+HUMAN_PAUSE_RE = re.compile(r"@coderabbitai\s+pause\b", re.I)
+HUMAN_RESUME_RE = re.compile(r"@coderabbitai\s+(?:resume|review|full review)\b", re.I)
+
+
+class GhError(Exception):
+    pass
+
+
+def gh(host, args, input_path=None):
+    cmd = ["gh", "api"]
+    if host:
+        cmd += ["--hostname", host]
+    cmd += args
+    if input_path:
+        cmd += ["--input", input_path]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise GhError(f"{' '.join(cmd[:6])}: {(p.stderr or p.stdout).strip()[:300]}")
+    return p.stdout
+
+
+def lines_json(raw):
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+def parse_repo(value):
+    parts = value.strip("/").split("/")
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    raise SystemExit(f"--repo must be [HOST/]OWNER/REPO, got {value!r}")
+
+
+def read_state(host, repo, pr):
+    pull = json.loads(gh(host, [f"repos/{repo}/pulls/{pr}", "--jq",
+                                "{head: .head.sha, draft: .draft, created: .created_at}"]))
+    everyone = lines_json(gh(host, ["--paginate", f"repos/{repo}/issues/{pr}/comments", "--jq",
+                                    ".[] | {id, body, login: .user.login, type: .user.type, updated: .updated_at}"]))
+    statuses = lines_json(gh(host, [f"repos/{repo}/commits/{pull['head']}/status", "--jq",
+                                    f'.statuses[] | select(.context == "{CONTEXT}") | {{state, description}}']))
+    reviews = lines_json(gh(host, ["--paginate", f"repos/{repo}/pulls/{pr}/reviews", "--jq",
+                                   f'.[] | select(.user.login == "{LOGIN}") | {{state, commit_id}}']))
+    bot = [c for c in everyone if c.get("login") == LOGIN]
+    humans = [c for c in everyone if c.get("login") != LOGIN and c.get("type") != "Bot"]
+    reviewed_head = any(r.get("commit_id") == pull["head"] for r in reviews)
+    return pull, bot, humans, (statuses[0] if statuses else None), reviewed_head
+
+
+def load_ledger(path):
+    if not path:
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_ledger(path, ledger):
+    if not path:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(ledger, f)
+    os.replace(tmp, path)
+
+
+def age_seconds(created):
+    try:
+        then = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) - then).total_seconds()
+
+
+def human_paused(humans):
+    """True when the latest pause/resume command a person typed is a pause."""
+    last = None
+    for c in humans:  # the API returns issue comments oldest first
+        body = c.get("body") or ""
+        if HUMAN_PAUSE_RE.search(body):
+            last = "pause"
+        elif HUMAN_RESUME_RE.search(body):
+            last = "resume"
+    return last == "pause"
+
+
+def tick(host, repo, comment_id, dry_run):
+    """Re-read the comment right before editing: CodeRabbit rewrites it on
+    every push, so a cached body would overwrite its newer content."""
+    body = json.loads(gh(host, [f"repos/{repo}/issues/comments/{comment_id}", "--jq", "{body}"]))["body"]
+    labels = [m.group(2) for m in TICK_RE.finditer(body)]
+    if not labels:
+        return []
+    if not dry_run:
+        new_body = TICK_RE.sub(lambda m: f"{m.group(1)}[x]{m.group(2)}", body)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"body": new_body}, f)
+            payload = f.name
+        try:
+            gh(host, ["-X", "PATCH", f"repos/{repo}/issues/comments/{comment_id}"], input_path=payload)
+        finally:
+            os.unlink(payload)
+    return [re.sub(r"<!--.*?-->|\*\*|<[^>]+>", "", label).strip() for label in labels]
+
+
+def classify(pull, bot, humans, status, reviewed_head):
+    """Where CodeRabbit stands on the head, before any tick."""
+    state = (status or {}).get("state")
+    description = (status or {}).get("description") or ""
+    # CodeRabbit edits one status comment in place, so the most recently
+    # updated comment is its current word; older comments are history.
+    current = max(bot, key=lambda c: c.get("updated") or "")["body"] if bot else ""
+    box = next((c for c in reversed(bot) if TICK_RE.search(c["body"])), None)
+    paused_box = box is not None and PAUSED_RE.search(box["body"])
+
+    if state == "pending":
+        return "reviewing", None
+    if paused_box:
+        # A paused branch can still show the previous head's "Review completed".
+        if RESUME_RE.search(box["body"]) and human_paused(humans):
+            return "paused-by-human", None
+        return "tickable", box
+    if reviewed_head or (state == "success" and "Review completed" in description):
+        return "reviewed", None
+    if state in ("error", "failure"):
+        return "failed", None
+    if box:
+        return "tickable", box
+    if ON_DEMAND_RE.search(current) or LIMIT_RE.search(description):
+        return "rate-limited", None
+    if NO_FILES_RE.search(current):
+        return "no-new-files", None
+    if state == "success" and "skipped" in description.lower():
+        return "skipped", None
+    if not bot and not status:
+        age = age_seconds(pull.get("created"))
+        if age is not None and age > ABSENT_AFTER_SECONDS:
+            return "absent", None
+    return "waiting", None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--repo", required=True)
+    ap.add_argument("--pr", required=True, type=int)
+    ap.add_argument("--wait", type=int, default=0)
+    ap.add_argument("--ledger")
+    ap.add_argument("--max-per-head", type=int, default=2)
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    host, owner, name = parse_repo(a.repo)
+    repo = f"{owner}/{name}"
+    deadline = time.monotonic() + max(a.wait, 0)
+
+    try:
+        while True:
+            pull, bot, humans, status, reviewed_head = read_state(host, repo, a.pr)
+            head = pull["head"]
+            verdict, box = classify(pull, bot, humans, status, reviewed_head)
+            out = {"state": verdict, "head": head, "draft": pull["draft"],
+                   "status": (status or {}).get("description")}
+            ledger = load_ledger(a.ledger)
+            entry = ledger.setdefault(head, {"ticks": 0, "first_seen": time.time()})
+            if not isinstance(entry, dict):  # an older ledger shape: the tick count alone
+                entry = ledger[head] = {"ticks": int(entry), "first_seen": time.time()}
+
+            if verdict == "tickable":
+                if entry["ticks"] >= a.max_per_head:
+                    out.update(state="tick-cap", ticks=entry["ticks"])
+                    save_ledger(a.ledger, ledger)
+                    break
+                labels = tick(host, repo, box["id"], a.dry_run)
+                if labels:
+                    if not a.dry_run:
+                        entry["ticks"] += 1
+                        save_ledger(a.ledger, ledger)
+                    out.update(state="ticked", boxes=labels, comment_id=box["id"],
+                               ticks=entry["ticks"] + (1 if a.dry_run else 0), dry_run=a.dry_run)
+                    break
+                out["state"] = verdict = "waiting"  # rewritten under us; look again
+            save_ledger(a.ledger, ledger)
+
+            if verdict == "rate-limited":
+                out["billable"] = bool(ON_DEMAND_RE.search(
+                    max(bot, key=lambda c: c.get("updated") or "")["body"] if bot else ""))
+                break
+            if verdict not in ("waiting", "skipped"):
+                break
+            if verdict == "waiting" and a.ledger and time.time() - entry["first_seen"] > NO_REACTION_SECONDS:
+                out["state"] = "no-reaction"
+                break
+            if time.monotonic() + POLL_SECONDS > deadline:
+                break
+            time.sleep(POLL_SECONDS)
+    except GhError as e:
+        print(json.dumps({"state": "error", "error": str(e)}))
+        return 1
+    except (ValueError, KeyError, TypeError) as e:
+        print(json.dumps({"state": "error", "error": f"unreadable gh output: {e!r}"[:300]}))
+        return 1
+
+    print(json.dumps(out))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

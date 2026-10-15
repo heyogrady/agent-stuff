@@ -1,0 +1,18 @@
+{
+  "name": "agent-stuff",
+  "version": "0.1.0",
+  "description": "Ship PRs that reviewers can read: reader-first descriptions, feature videos with a visible cursor, and a PR babysitter.",
+  "author": { "name": "Patrick O'Grady" },
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Stuff",
+    "shortDescription": "Write PRs, record feature videos, and babysit PRs to merge-ready",
+    "longDescription": "Skills for the last mile of a change: open a PR with a description written for its reader, film the UI change with a visible cursor and attach it, resolve review feedback, and watch the PR until it is ready to merge.",
+    "developerName": "Patrick O'Grady",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/heyogrady/agent-stuff",
+    "defaultPrompt": ["Open a PR for this branch", "Record a video of this PR", "Babysit this PR"]
+  }
+}

@@ -1,0 +1,10 @@
+{"baseUrl":"http://localhost:8765","frames":{"app":"iframe#app"},"actions":[
+ {"type":"goto","url":"/index.html"},{"type":"waitFor","frame":"app","selector":"#inc"},{"type":"mark"},
+ {"type":"wait","ms":600},
+ {"type":"zoom","frame":"app","selector":"#widget","stay":true},
+ {"type":"click","frame":"app","selector":"#inc"},
+ {"type":"select","frame":"app","selector":"#plan","option":"Pro"},
+ {"type":"zoom","frame":"app","selector":"#map","ms":1200},
+ {"type":"click","frame":"app","selector":"#help","expect":{"frame":"app","selector":"#pop"}},
+ {"type":"spotlight","frame":"app","selector":"#pop","label":"Help explains the counter","ms":1800}],
+ "output":{"name":"guided"}}

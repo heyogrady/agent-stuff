@@ -1,0 +1,4 @@
+{"baseUrl":"http://localhost:8765","actions":[
+ {"type":"goto","url":"/app.html"},{"type":"waitFor","selector":"#paint"},{"type":"scrollTo","selector":"#map"},{"type":"mark"},
+ {"type":"wait","ms":500},{"type":"click","selector":"#paint"}],
+ "output":{"name":"canvas-crop"}}

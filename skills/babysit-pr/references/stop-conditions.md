@@ -1,0 +1,44 @@
+# Step 3: stop conditions
+
+Read at the end of every tick. It decides true stops, standing residuals, and the review-still-coming judgment behind the `merge-ready` settle.
+
+**In `mode:pipeline`, use the bounded pipeline stop** in `references/pipeline.md`. Skip the merge-ready settle window and human approval; the terminal and blocked conditions still apply.
+
+Otherwise (interactive), classify each condition as a **true stop** (the watch ends and hands back) or a **standing residual** (surfaced, blocks a *merge-ready declaration*, but the watch **keeps running around it**). **Terminal**, **looks merge-ready**, **budget**, and **`blocked-external-drained`** are true stops; a first **`blocked-external`** observation enters the bounded review drain below instead. **`needs-human`**, **`blocked-failing`**, **`chain-blocked`**, and an unresolved semantic conflict are standing residuals. In **checkpoint mode** the single tick ends regardless of class; the distinction only changes what you report.
+
+## True stops
+
+- **Terminal**: PR `MERGED` or `CLOSED`.
+- **Looks merge-ready (settled)**: GitHub reports it mergeable (`mergeability_certain`, `mergeable == "MERGEABLE"`, `merge_state_status == "CLEAN"`, which defers required-check and required-review policy to GitHub once the merge computation is bound to the proven current base and head); `base_ref_blocker`, `chain_blocker`, and `branch_currency_blocker` are null; `checks_terminal` is true; there is **zero actionable backlog** (`counts.threads == 0` **and** `counts.comments == 0`); `open_needs_human == 0`; `quiet_seconds` has reached the settle threshold; **and** the review-still-coming gate below is clear, or its bounded wait has run out and you say so.
+  - "Mergeable against the current base" does not mean the head contains the latest base commit; ordinary base movement with GitHub reporting `CLEAN` needs no maintenance.
+  - A dependent PR with an open parent is **"ready relative to its parent"**: name the parent that must land first.
+  - The settle threshold is the script's **300s default**. The only thing that widens it is the re-arm after a rejected `merge-ready` wake (below); never pre-widen the initial arm.
+  - **Before reporting ready, check description freshness.** If the run's commits materially changed what the PR does (new or removed behavior, a changed approach, resolved caveats), say in the summary that the description may be stale and suggest `/open-pr <PR#|URL>` (refresh) or `/open-pr describe-only <PR#|URL>` (preview). Do not edit the description yourself and do not invoke `open-pr`.
+  - Report "looks ready, your call to merge", never "safe to merge". In **checkpoint mode**, when it is otherwise clean but `quiet_seconds` is under the threshold, say "green now, re-run in about 5 minutes to confirm it stayed quiet before merging."
+- **Blocked on external CI approval, after draining review**: `checks_awaiting_approval > 0` with no actionable backlog means a workflow awaits a maintainer's approval to run (GitHub's fork-PR gate). The loop cannot trigger it; **never approve the run**. Review may still move, so the first observation is not an interactive stop:
+  - **Interactive watch:** without asking, apply the review-still-coming judgment and re-arm at `--interval 150` with `--blocked-external-drain-seconds 300` when no review looks to be on its way, or `900` when one does. New feedback still wakes ahead of the gate; resolve it, then re-arm the drain. If approval clears, return to the ordinary CI watch.
+  - **Drain expiry:** `blocked-external-drained` is the decision wake. At 900 quiet seconds, concrete prior timing from the same reviewer on this PR may justify one re-arm at `1800`, never more on a merely missing completion signal. Apply the review-still-coming judgment once more before handing back: a reviewer may have announced itself after the tier was chosen. Only an explicit user request to keep watching overrides these, capped by the invocation's budget.
+  - **Handback:** once the drain expires with the gate still present, stop without asking. Report that all observed feedback was handled, how long the head was review-quiet, that CI never ran because maintainer approval is still required, and give the resume invocation.
+  - **Pipeline:** do not drain or wait; return a `blocked-external` residual with the run URL.
+  - **Checkpoint:** process the tick, report the gate, say monitoring is paused, and give the resume invocation.
+- **Budget exhausted**: active `invocation_elapsed_seconds` reaches the invocation budget (default 8h, or the user's duration), the 3-day wall-clock backstop is hit, a round cap the user set is hit, or the user aborts. The `max-runtime` wake names the ceiling in `max_runtime_ceiling` (`active-budget` or `backstop`). Report `invocation_elapsed_seconds` and the budget, never `persisted_state_age_seconds`, and never mint another invocation automatically.
+
+## Standing residuals: surface, then keep watching
+
+- **`needs-human`**: items the resolver or the CI pass returned (including a non-convergence park), or a semantic merge conflict the currency stream could not resolve mechanically. Surface each with its one-line "what it needs" (Step 4) and park it (`references/watch-loop.md` § Recording residuals). A parked item **blocks merge-ready** but **does not end the watch**: keep handling new review and CI. Re-open a parked item (`--disposition open`) when its context materially changes.
+- **`blocked-failing`**: a dispatched check left terminally red (`has_failing_checks` with `counts.ci == 0`). It blocks merge-ready; a later commit may clear it. Keep watching.
+- **`chain-blocked`**: the relationship probe failed (`chain_blocker`). Keep working review and CI; do no branch-currency work and do not declare ready until a later probe succeeds.
+
+## Is a review still coming?
+
+The settle window tells you the PR stopped moving. It does not tell you a review is not on its way: the window can elapse before a backgrounded reviewer even starts. Judge that separately at the settle decision, from one cheap `gh` look at the current head covering every place an announcement can arrive: reactions on the PR body, top-level comments, the check runs on that head, and reviews against it. A resumed run has no memory of an interim comment it already classified, so the lookup is the only place it can still be seen.
+
+A reviewer that announces itself (a 👀 reaction, a "reviewing…" note) has told you it **started**. Nothing obliges it to retract that when it finishes, so a standing announcement is not evidence that work continues. Look for what that reviewer produced on this head: its review, its comment, or a check run that *is* its review, having reached a terminal conclusion, means it stopped (say which; never read a timeout or a skip as approval). Anything of its still running means it is still working. Output that does not account for the announced review leaves it outstanding. A reviewer that announced itself and has nothing to show either way is the undecidable case.
+
+A reviewer that reviewed an **earlier** head and not this one has told you the same thing through its history on this PR, even if it never announces. Treat it like one that announced with nothing to show yet; it clears when it reviews this head or when the bounded wait runs out.
+
+**CodeRabbit is decided by tick step 8, not by this lookup.** Its `CodeRabbit` status reads success for a skipped or rate-limited review too. The latest `coderabbit-tick` state for the current head decides: `ticked`, `reviewing`, or `waiting` is a review still coming; `reviewed`, `no-new-files`, or `absent` clears it; any other state is a standing residual that blocks the looks-ready call (`references/coderabbit.md`).
+
+Keep the asymmetry in mind: a **present** signal is informative, an **absent** one tells you nothing, since many reviewers announce nothing and simply post. Never wait terminally for a done signal, and never let a missing one block on its own.
+
+**Widening the window.** Wait while you can see work in progress, and wait a bounded while when a reviewer announced itself with nothing to show. Re-arm by re-running the watch arm with a longer `--settle-seconds` (quiet already exceeds the 300s default, so the ordinary arm would re-fire at once): about 900, extended once to no more than 1800 when concrete prior timing for that reviewer justifies it. Those are ceilings, not targets: announcing reviewers often finish within minutes, while slow silent reviewers can take 20 minutes or more. Once 1800 quiet seconds pass on unchanged evidence, stop and say plainly what you could not confirm. When the evidence moves during a widened window, the watch wakes on `review-evidence-moved`; re-judge from the current head. Readiness is a recommendation to the user, never authorization to merge, so calling it early costs a disclosure while holding forever costs the PR.

@@ -1,0 +1,13 @@
+{
+  "name": "agent-stuff",
+  "version": "0.1.0",
+  "description": "Ship PRs that reviewers can read: reader-first descriptions, feature videos with a visible cursor, and a PR babysitter.",
+  "author": {
+    "name": "Patrick O'Grady",
+    "url": "https://github.com/heyogrady"
+  },
+  "homepage": "https://github.com/heyogrady/agent-stuff",
+  "repository": "https://github.com/heyogrady/agent-stuff",
+  "license": "MIT",
+  "keywords": ["pull-requests", "feature-video", "playwright", "code-review", "github", "nono"]
+}

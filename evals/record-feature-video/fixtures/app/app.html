@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;font:15px -apple-system,sans-serif;background:#f8fafc;color:#0f172a}
+#shell{display:flex;flex-direction:column;height:100%}
+header{height:52px;flex:none;background:#0f172a;color:#fff;display:flex;gap:18px;align-items:center;padding:0 18px}
+header a{color:#93c5fd;text-decoration:none}
+main{flex:1;overflow:auto;position:relative}
+.sticky{position:sticky;top:0;background:#fef3c7;padding:10px 18px;z-index:3;border-bottom:1px solid #fcd34d}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin:16px;max-width:420px}
+button{font:inherit;padding:7px 13px;border-radius:8px;border:1px solid #94a3b8;background:#fff;cursor:pointer}
+button[disabled]{opacity:.5}
+#drop{border:2px dashed #94a3b8;border-radius:12px;padding:36px;text-align:center;margin:16px;max-width:420px}
+#drop.over{border-color:#2563eb;background:#dbeafe}
+.wide{overflow-x:auto;margin:16px;max-width:520px}.wide table{width:1400px}
+#pop{display:none;position:absolute;background:#0f172a;color:#fff;padding:8px 12px;border-radius:8px;margin-top:6px}
+.row{padding:8px 18px;border-bottom:1px solid #e2e8f0}
+canvas{display:block;margin:16px;border:1px solid #cbd5e1}
+</style></head><body><div id="shell">
+<header><b>Demo</b><a href="#/home" id="nav-home">Home</a><a href="#/import" id="nav-import">Import</a><a href="#/runs" id="nav-runs"><span id="nav-runs-label" style="pointer-events:none">Runs</span></a></header>
+<main id="main"></main></div>
+<script>
+const views = {
+  home: `<div class="sticky">Pinned summary bar</div>
+    <div class="card" id="widget">Counter: <b id="count">0</b><br><br>
+      <button id="inc">Increment</button> <button id="locked" disabled>Locked</button> <button id="confirm" style="display:none">Confirm</button>
+      <span style="position:relative"><button id="help">Help</button><div id="pop">Help popover</div></span><br><br>
+      <select id="plan"><option value="basic">Basic</option><option value="pro">Pro</option></select>
+      <input id="name" placeholder="Name" style="margin-top:10px;padding:6px;width:240px"></div>
+    <div style="display:flex;gap:40px;align-items:flex-start"><canvas id="map" width="360" height="220"></canvas>
+      <button id="paint" style="margin-top:180px">Paint storm</button></div>
+    <div class="wide"><table><tr>${Array.from({length:14},(_,i)=>`<td style="padding:6px;border:1px solid #e2e8f0" id="col-${i}">Column ${i}</td>`).join("")}</tr></table></div>
+    ${Array.from({length:60},(_,i)=>`<div class="row" id="row-${i+1}">Row ${i+1}</div>`).join("")}
+    <div style="display:none">${Array.from({length:3},(_,i)=>`<div class="row">Hidden copy ${i+1}</div>`).join("")}</div>`,
+  import: `<div id="drop">Drop a CSV here<div id="dropped"></div></div>
+    <div class="card"><label for="file" id="file-label"><b>Choose file…</b></label><input type="file" id="file" hidden><div id="picked"></div></div>
+    <div class="card"><textarea id="paste" rows="4" cols="40" placeholder="Paste rows"></textarea><div id="parsed"></div></div>`,
+  runs: `<div class="card"><h3>Runs</h3><div id="runs-list">${Array.from({length:5},(_,i)=>`<div class="row">Run ${i+1}</div>`).join("")}</div></div>`,
+};
+function route(){ const v = (location.hash.replace("#/","")||"home"); main.innerHTML = views[v] || views.home; wire(); }
+function wire(){
+  const $ = (id) => document.getElementById(id);
+  if ($("inc")) $("inc").onclick = () => $("count").textContent = +$("count").textContent + 1;
+  if ($("help")) $("help").onclick = () => { $("pop").style.display = $("pop").style.display === "block" ? "none" : "block"; };
+  if ($("paint")) $("paint").onclick = () => { const c = $("map").getContext("2d"); c.fillStyle = "#2563eb"; c.beginPath(); c.arc(180,110,70,0,7); c.fill(); };
+  if ($("map")) { const c = $("map").getContext("2d"); c.fillStyle = "#e0f2fe"; c.fillRect(0,0,360,220); }
+  const d = $("drop");
+  if (d) {
+    d.addEventListener("dragenter", (e) => { e.preventDefault(); d.classList.add("over"); });
+    d.addEventListener("dragover", (e) => { e.preventDefault(); d.classList.add("over"); });
+    d.addEventListener("dragleave", () => { d.classList.remove("over"); $("dropped").textContent = "Not dropped"; });
+    d.addEventListener("drop", (e) => { e.preventDefault(); d.classList.remove("over");
+      const f = [...e.dataTransfer.files]; $("dropped").textContent = f.length ? "Got " + f.map((x) => x.name + " (" + x.size + "b)").join(", ") : "Not a file"; });
+  }
+  if ($("file")) $("file").onchange = (e) => $("picked").textContent = "Picked " + e.target.files[0].name;
+  if ($("paste")) $("paste").addEventListener("paste", (e) => { e.preventDefault();
+    const rows = e.clipboardData.getData("text/plain").trim().split("\n"); $("parsed").textContent = "Parsed " + rows.length + " rows"; });
+}
+addEventListener("hashchange", route); route();
+</script></body></html>

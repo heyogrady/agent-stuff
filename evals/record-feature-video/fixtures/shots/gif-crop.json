@@ -1,0 +1,9 @@
+{"baseUrl":"http://localhost:8765","actions":[
+ {"type":"goto","url":"/plain.html"},
+ {"type":"expect","selector":"#count","text":"0"},
+ {"type":"mark"},
+ {"type":"wait","ms":800},
+ {"type":"click","selector":"#inc"},
+ {"type":"click","selector":"#inc","ms":400},
+ {"type":"type","selector":"#name","text":"Ada","expect":{"selector":"#count","text":"2"}},
+ {"type":"expect","selector":"#name","value":"Ada"}],"output":{"name":"gif-crop"}}

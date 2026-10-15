@@ -1,0 +1,20 @@
+{
+  "name": "agent-stuff",
+  "owner": {
+    "name": "Patrick O'Grady",
+    "url": "https://github.com/heyogrady"
+  },
+  "metadata": {
+    "description": "Skills for shipping pull requests",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-stuff",
+      "description": "Ship PRs that reviewers can read: reader-first descriptions, feature videos with a visible cursor, and a PR babysitter.",
+      "version": "0.1.0",
+      "author": { "name": "Patrick O'Grady" },
+      "source": "./"
+    }
+  ]
+}

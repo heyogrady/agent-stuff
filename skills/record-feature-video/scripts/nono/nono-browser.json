@@ -1,0 +1,13 @@
+{
+  "$schema": "https://nono.dev/schemas/nono-profile.schema.json",
+  "extends": "default",
+  "meta": {
+    "name": "feature-recorder-browser",
+    "version": "0.2.0",
+    "description": "Headless Chromium for record-feature-video, in its own sandbox beside the agent's: reads only its install folder, reaches only the agent's localhost ports and hosts"
+  },
+  "unsafe_macos_seatbelt_rules": [
+    "(allow mach-register (global-name-prefix \"org.chromium.\"))",
+    "(allow iokit-open (iokit-user-client-class \"RootDomainUserClient\"))"
+  ]
+}

@@ -1,0 +1,12 @@
+{"baseUrl":"http://localhost:8765","frames":{"app":"iframe#app"},"actions":[
+ {"type":"goto","url":"/index.html"},{"type":"waitFor","frame":"app","selector":"#inc"},{"type":"mark"},
+ {"type":"wait","ms":600},
+ {"type":"scroll","frame":"app","to":"#row-45","block":"start","offset":60,"expect":{"frame":"app","selector":"#row-45","state":"visible"}},
+ {"type":"scroll","frame":"app","container":"#main","to":"top"},
+ {"type":"scroll","frame":"app","selector":".wide","x":500},
+ {"type":"click","frame":"app","selector":"#nav-import","expect":{"frame":"app","selector":"#drop"}},
+ {"type":"drop","frame":"app","selector":"#drop","file":"../app/orders.csv","expect":{"frame":"app","selector":"#dropped","text":"Got orders.csv"}},
+ {"type":"drop","frame":"app","selector":"#drop","text":"a text selection","leave":true,"expect":{"frame":"app","selector":"#dropped","text":"Not dropped"}},
+ {"type":"upload","frame":"app","selector":"#file","file":"../app/orders.csv","expect":{"frame":"app","selector":"#picked","text":"Picked orders.csv"}},
+ {"type":"paste","frame":"app","selector":"#paste","text":"a,1\nb,2\nc,3","expect":{"frame":"app","selector":"#parsed","text":"Parsed 3 rows"}}],
+ "output":{"name":"iframe-flow"}}
