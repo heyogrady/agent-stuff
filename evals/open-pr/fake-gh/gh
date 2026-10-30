@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Fake gh for open-pr behavioral runs. Captures the PR instead of posting it.
+#
+# State lives in $FAKE_GH_STATE (required): title.txt, body.md, draft.
+# Seed title.txt and body.md before a run to stand in for an existing PR.
+# Every call is appended to $FAKE_GH_STATE/calls.log. A call this fake does
+# not know fails loudly, so a run can never reach the real GitHub.
+
+set -uo pipefail
+S="${FAKE_GH_STATE:?FAKE_GH_STATE must name a folder}"
+mkdir -p "$S"
+printf '%s\n' "$*" >> "$S/calls.log"
+URL="https://github.com/acme/web/pull/1"
+
+arg() {  # value after flag $1 in the remaining args
+  local flag="$1"; shift
+  while [ $# -gt 0 ]; do [ "$1" = "$flag" ] && { echo "${2:-}"; return; }; shift; done
+}
+
+save() {
+  local title body_file body
+  title="$(arg --title "$@")"; body_file="$(arg --body-file "$@")"; body="$(arg --body "$@")"
+  [ -n "$title" ] && printf '%s\n' "$title" > "$S/title.txt"
+  if [ -n "$body_file" ]; then cp "$body_file" "$S/body.md"
+  elif [ -n "$body" ]; then printf '%s\n' "$body" > "$S/body.md"; fi
+}
+
+pr_json() {  # the existing PR as gh would print it, or nothing
+  [ -f "$S/body.md" ] || return 0
+  python3 - "$S" "$URL" "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" <<'EOF'
+import json, os, sys
+s, url, head = sys.argv[1:4]
+read = lambda f: open(os.path.join(s, f)).read().rstrip("\n") if os.path.exists(os.path.join(s, f)) else ""
+print(json.dumps({"number": 1, "url": url, "title": read("title.txt"), "body": read("body.md"),
+                  "state": "OPEN", "isDraft": os.path.exists(os.path.join(s, "draft")),
+                  "headRefName": head, "headRepositoryOwner": {"login": "acme"},
+                  "isCrossRepository": False, "baseRefName": "main", "headRefOid": "0" * 40,
+                  "commits": []}))
+EOF
+}
+
+case "${1:-} ${2:-}" in
+  "--version "*|"version "*) echo "gh version 2.99.0 (fake)"; exit 0 ;;
+  "auth status") echo "github.com: Logged in to github.com account dev"; exit 0 ;;
+  "repo view")
+    if [[ "$*" == *--jq* ]]; then echo main; else echo '{"defaultBranchRef":{"name":"main"}}'; fi
+    exit 0 ;;
+  "pr create")
+    if [[ "$*" == *--help* ]]; then echo "  -a, --attach file   Attach a file to the body (gh 2.99+)"; exit 0; fi
+    shift 2; save "$@"
+    if [[ " $* " == *" --draft "* ]]; then touch "$S/draft"; else rm -f "$S/draft"; fi
+    echo "$URL"; exit 0 ;;
+  "pr edit") shift 2; save "$@"; echo "$URL"; exit 0 ;;
+  "pr list")
+    j="$(pr_json)"; if [ -n "$j" ]; then echo "[$j]"; else echo "[]"; fi; exit 0 ;;
+  "pr view")
+    j="$(pr_json)"
+    [ -n "$j" ] || { echo "no pull requests found" >&2; exit 1; }
+    if [[ "$*" == *"--jq .body"* || "$*" == *"--jq '.body'"* ]]; then cat "$S/body.md"; else echo "$j"; fi
+    exit 0 ;;
+  "pr diff") git diff "main...HEAD"; exit 0 ;;
+esac
+
+echo "fake gh: unsupported call: gh $*" >&2
+exit 1
