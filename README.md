@@ -101,6 +101,7 @@ Evals live in `evals/<skill>/`, outside `skills/`, so an agent running a skill c
 | `record-feature-video/check-recorder.sh` | The recorder end to end in real headless Chromium: shot-list lint, rehearsal, GIF and MP4 takes, cropping, scene cuts, and the nono browser launcher | 29 | ~2 min | Node.js 20+, ffmpeg, the recorder's Playwright |
 | `babysit-pr/check-snapshot.sh` | The PR snapshot: work already claimed is not done twice, items that need a person are flagged, and an out-of-date branch is caught | 13 | seconds | python3 |
 | `resolve-pr-feedback/check-scripts.sh` | Fetching only unresolved review threads, replying (and refusing while a review is pending), and resolving threads | 7 | seconds | jq |
+| `open-pr/check-scripts.sh` | The settings resolver (defaults, personal over team, comments, invalid values, the main-checkout fallback); the body linter against one broken fixture per rule; and the skill's own worked examples against that linter | 36 | seconds | bash, git, python3 |
 
 Run them from the repo root:
 
@@ -110,15 +111,21 @@ bash skills/record-feature-video/scripts/setup.sh       # once, before the recor
 bash evals/record-feature-video/check-recorder.sh
 bash evals/babysit-pr/check-snapshot.sh
 bash evals/resolve-pr-feedback/check-scripts.sh
+bash evals/open-pr/check-scripts.sh
 ```
+
+`evals/open-pr/lint-body.py` also works on its own: give it any PR body (and `--title`) to see which of `open-pr`'s mechanical rules it breaks.
 
 `check-helpers.sh` runs under `/bin/bash` (bash 3.2 on macOS) on purpose, to keep the scripts portable. Pass check IDs to run a subset (`check-helpers.sh P6c C19`), and set `KEEP=1` to keep the scratch folder.
 
-**Behavioral packs** test the instructions rather than the scripts: whether `SKILL.md` leads a fresh agent to a good result. A pack is run by hand. Two fresh agents run the skill on the same real PR, one following your branch and one following `main`, and you score both against the pack's rubric (time, retakes, accuracy, clarity, craft). Never show a pack to the agent under test. [`record-feature-video/skill-pack.md`](evals/record-feature-video/skill-pack.md) is the only pack so far.
+**Behavioral packs** test the instructions rather than the scripts: whether `SKILL.md` leads a fresh agent to a good result. A pack is run by hand. Two fresh agents run the skill on the same real PR, one following your branch and one following `main`, and you score both against the pack's rubric (time, retakes, accuracy, clarity, craft). Never show a pack to the agent under test. There are two:
+
+- [`record-feature-video/skill-pack.md`](evals/record-feature-video/skill-pack.md): four cases, scored on time, retakes, accuracy, clarity and craft.
+- [`open-pr/skill-pack.md`](evals/open-pr/skill-pack.md): eleven cases, one per way a description can go wrong, run three times per arm against a fake `gh` that captures the body. Each body is linted, scored for recall of a claims list written before the run, and compared blind by a judge from a different model family, in both orders.
 
 **When you change a skill**, run its deterministic checks; when you change its `SKILL.md` or references, run its pack too if it has one. There is no CI, so nothing runs these for you.
 
-**Not covered yet:** `open-pr` and `noslop` have no evals. Their output is prose, so they need behavioral packs that judge a PR description against the writing reference; `open-pr`'s `scripts/pr-config.py` could also get deterministic checks.
+**Not covered yet:** `noslop` has no evals, and `babysit-pr` and `resolve-pr-feedback` have no behavioral packs.
 
 ## Credits
 
