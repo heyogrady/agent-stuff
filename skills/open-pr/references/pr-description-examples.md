@@ -20,56 +20,114 @@ Lede and ticket. Nothing else — no *How it works*, no collapsibles, not even t
 
 ## Bug fix
 
-**Title:** `Paid Invoices No Longer Get Overdue Reminders`
+**Title:** `Client Pages Load When The Phone Is Blank`
 
-```markdown
-Clients who paid an invoice by bank transfer were still getting "your invoice is overdue" emails for it, sometimes three in a row. Since Tuesday, 41 clients received one. Reminders now check the invoice's live payment status, so a paid invoice never sends one.
+````markdown
+Opening a client whose phone number was saved empty showed an error page instead of the client. It failed on the full client page and in the client slide-over. Those clients now open, with an empty Phone field.
 
-Resolves PROJ-388
+Related: Sentry [BILLING-7N](…)
 
 ## What was wrong
 
-The reminder job read `invoice.status`, which is set to `paid` when a card payment clears. Bank transfers are matched by a separate reconciliation job that writes `invoice.paid_at` but, until this change, never updated `status`. So a transfer-paid invoice stayed `sent` forever and the reminder job kept picking it up.
+- **What:** opening some clients showed an error page instead of the client.
+- **Where:** the client page and slide-over; `app/views/clients/_details.html.erb:29` raised.
+- **Cause:** a phone saved as `""` counts as set, so the page drew a phone link with no label.
+- **Who / how often:** 41 events from 6 users, March 3 to March 12.
 
-## The fix
+## Summary
 
-`Invoice#paid?` is now the single answer and reads both fields (`status == "paid" || paid_at.present?`). The reminder job, the dashboard badge and the CSV export all call it instead of comparing `status` themselves. The reconciliation job also sets `status = "paid"` going forward, so new rows are consistent either way; a one-off migration backfills the 212 historical rows where `paid_at` was set and `status` was not.
+`LinkComponent` raises on an empty label, so the view now checks `present?` first.
 
-The fix lives on the model rather than in the reminder job because the dashboard had the same bug — a transfer-paid invoice showed an "Unpaid" badge — and the export would have had it next.
+```diff
+ clients/_details.html.erb  (Phone field)
+-  render LinkComponent(href: "tel:…", label: …)  if client.phone
++  render LinkComponent(href: "tel:…", label: …)  if client.phone.present?
+```
 
-## Worth knowing
+| `phone` | `country_code` | Before | After |
+|---|---|---|---|
+| `nil` | `nil` | empty | empty |
+| `""` | `nil` | error page | empty |
+| `""` | `"+44"` | `tel:+44` link that dials nothing | empty |
+| `"0207 946 0000"` | `nil` | `tel:` link | `tel:` link, unchanged |
 
-- The 41 clients who already received a wrong reminder are listed in the ticket. Sending them a correction email is a product decision and is not done here.
-- Card refunds set `status = "refunded"` and leave `paid_at` set, so `paid?` returns true for a refunded invoice. That was already the dashboard's behaviour and is unchanged; PROJ-402 tracks a proper refund state.
+| Before | After |
+|---|---|
+| [screenshot: error page] | [screenshot: client page, Phone field empty] |
+
+## Evidence
+
+The new request spec, as pseudocode:
+
+```text
+given a client with phone "" and no country code
+when someone opens the client page
+then the page loads, with no "tel:" link
+```
+
+- **Before** (commit `a1b2c3d` adds the spec, without the fix): it fails with the error Sentry reports.
+
+  ```text
+  Failure/Error: raise ArgumentError, 'link requires a label or block content'
+    ActionView::Template::Error: link requires a label or block content
+    # ./app/views/clients/_details.html.erb:29
+  3 examples, 2 failures
+  ```
+
+- **After:** the same spec passes.
+
+  ```text
+  $ bundle exec rspec spec/requests/clients_spec.rb
+  3 examples, 0 failures
+  ```
+
+## Merge Danger
+
+**Door:** two-way. One condition in one view, with no migration and no data change; a revert restores the old page.
+
+**Blast Radius:** tiny. Only the Phone field on the client page and the client slide-over.
+
+## Potential follow-ups
+
+Found while fixing this. None of it is in this PR.
+
+| Urgency | Finding | Where | Why it matters | How sure | Next step |
+|---|---|---|---|---|---|
+| Do soon | **Statement PDF may draw the same link** | `app/pdfs/statement_pdf.rb` | A blank phone could break a client's monthly statement. | Suspected | Reproduce with a blank phone, then fix |
+| Plan it | **Saved blank phones need a backfill** | `clients.phone` | Exports still send `""` to the accounting system. | Confirmed in code | Count the rows, then decide on a backfill |
+| Nice to have | **Two phone helpers do one job** | `app/helpers/phone_helper.rb` | The copies can drift apart. | Confirmed in code | Merge them into one |
+
+## Verify in production
+
+The run could not see the production client behind the Sentry events, so the spec builds one with `phone: ""`. After deploy:
+
+1. Open [BILLING-7N](…) and copy the client path from the latest event's request URL.
+2. Open that path as a full page, then open the same client from the client list. Both load, with an empty Phone field.
+3. Open `/admin/clients/<id>` for that client and confirm the phone is blank.
+4. Watch BILLING-7N for a week of normal traffic. With no new events, resolve it.
+
+<details><summary><strong>All decisions</strong></summary>
+
+- **Fix the view, not the data.** Storing `nil` for a blank phone would not repair rows that already hold `""`. The view guard fixes every row and matches the app's other phone links, which already use `present?`.
+- **Keep `LinkComponent` strict.** It raises on an empty label so a broken caller fails loudly. Loosening it would hide the next one.
+
+</details>
 
 <details><summary><strong>In this PR</strong></summary>
 
-- Add `Invoice#paid?` reading `status` and `paid_at`; use it in `InvoiceReminderJob`, the dashboard badge and `InvoiceExport`
-- Set `status = "paid"` from `ReconciliationJob` when a transfer matches
-- Add a migration backfilling `status` where `paid_at` is set
-- Add specs for transfer-paid, card-paid, refunded and unpaid invoices against the reminder job
+- Guard the phone link in `clients/_details` with `phone.present?`
+- Add request specs for `GET /clients/:id` with a blank phone, as a full page and in the slide-over
 
 </details>
 
 <details><summary><strong>Verification</strong></summary>
 
-- 318 model and job specs pass, including new cases for transfer-paid, card-paid, refunded and unpaid invoices against the reminder job.
-- The backfill migration was run against a staging copy of production: 212 rows updated, 0 rows where `status` was `paid` without `paid_at`.
+- `bin/rubocop` and `bin/erb_lint` report no offenses on the changed files.
 
 </details>
+````
 
-<details><summary><strong>Post-deploy monitoring</strong></summary>
-
-**Where to look.** The `InvoiceReminderJob` row in Sidekiq and the `reminders_sent` metric.
-
-**Healthy.** `reminders_sent` drops by roughly 40 per day (the wrong ones) and `reminder_complaints` in support stops growing.
-
-**Failure signal.** Any reminder logged for an invoice with `paid_at` set. Query: `SELECT id FROM reminders r JOIN invoices i ON i.id = r.invoice_id WHERE i.paid_at IS NOT NULL AND r.sent_at > '<deploy time>'`.
-
-**Rollback.** Revert the commit. The migration is additive (sets `status` on rows that already had `paid_at`) and does not need reversing.
-
-</details>
-```
+No *How it works* and no *Worth knowing*: *What was wrong*, *Summary*, and *Potential follow-ups* carry them. No *Post-deploy monitoring*: *Merge Danger* owns the rollback and *Verify in production* the checks.
 
 ---
 
