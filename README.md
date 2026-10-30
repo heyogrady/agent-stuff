@@ -89,16 +89,36 @@ Type the skill name followed by any of these; plain language works too ("open a 
 
 `mode:pipeline` runs a skill without questions, for an orchestrator that calls it.
 
-## Tests
+## Evals
 
-Deterministic checks live in `evals/`, outside the skill folders so an agent under test cannot read them:
+Evals live in `evals/<skill>/`, outside `skills/`, so an agent running a skill cannot read the answers. There are two kinds.
+
+**Deterministic checks** run a skill's scripts against fixtures: a stub `gh`, a small fixture web app, and throwaway git repos. They never touch the network, upload a file, or edit a real PR. Each script exits with its number of failed checks, so `0` means everything passed.
+
+| Script | What it checks | Checks | Time | Needs |
+|---|---|---|---|---|
+| `record-feature-video/check-helpers.sh` | Where the video lands in the PR body, which diffs get a video and which are skipped, settings lookup, the warning when a file holding a password is not git-ignored | 50 | ~20 s | bash, git, jq, python3 |
+| `record-feature-video/check-recorder.sh` | The recorder end to end in real headless Chromium: shot-list lint, rehearsal, GIF and MP4 takes, cropping, scene cuts, and the nono browser launcher | 29 | ~2 min | Node.js 20+, ffmpeg, the recorder's Playwright |
+| `babysit-pr/check-snapshot.sh` | The PR snapshot: work already claimed is not done twice, items that need a person are flagged, and an out-of-date branch is caught | 13 | seconds | python3 |
+| `resolve-pr-feedback/check-scripts.sh` | Fetching only unresolved review threads, replying (and refusing while a review is pending), and resolving threads | 7 | seconds | jq |
+
+Run them from the repo root:
 
 ```
 /bin/bash evals/record-feature-video/check-helpers.sh
-bash evals/record-feature-video/check-recorder.sh     # real Chromium and ffmpeg
+bash skills/record-feature-video/scripts/setup.sh       # once, before the recorder check
+bash evals/record-feature-video/check-recorder.sh
 bash evals/babysit-pr/check-snapshot.sh
 bash evals/resolve-pr-feedback/check-scripts.sh
 ```
+
+`check-helpers.sh` runs under `/bin/bash` (bash 3.2 on macOS) on purpose, to keep the scripts portable. Pass check IDs to run a subset (`check-helpers.sh P6c C19`), and set `KEEP=1` to keep the scratch folder.
+
+**Behavioral packs** test the instructions rather than the scripts: whether `SKILL.md` leads a fresh agent to a good result. A pack is run by hand. Two fresh agents run the skill on the same real PR, one following your branch and one following `main`, and you score both against the pack's rubric (time, retakes, accuracy, clarity, craft). Never show a pack to the agent under test. [`record-feature-video/skill-pack.md`](evals/record-feature-video/skill-pack.md) is the only pack so far.
+
+**When you change a skill**, run its deterministic checks; when you change its `SKILL.md` or references, run its pack too if it has one. There is no CI, so nothing runs these for you.
+
+**Not covered yet:** `open-pr` and `noslop` have no evals. Their output is prose, so they need behavioral packs that judge a PR description against the writing reference; `open-pr`'s `scripts/pr-config.py` could also get deterministic checks.
 
 ## Credits
 

@@ -42,10 +42,56 @@ Parts 5–7 appear only when they have content. A tiny PR is parts 1–2.
 | **New feature** | `## What you can do now` | A numbered walk-through from the user's chair, each step with the screenshot that shows it. Then an optional **Background** paragraph glossing the domain in plain words, for a reader new to it. |
 | **Large feature** — more than one user-facing capability, or a new subsystem | `## What you can do now` with one `###` per capability · `## How it fits together` replaces *How it works* | Each capability gets its own walk-through and its own screenshots. The code view opens with a component table or diagram showing how the pieces connect and the boundaries that hold the design together, then one `###` per capability (and per cross-cutting concern such as privacy or performance) for the mechanism. The lede names every capability in one breath. The stop-anywhere rule now holds at two levels: after the lede the reader knows the umbrella; after any `###` they know that one capability. |
 | **Change to existing behavior** | `## Before / After` | A table (or two short paragraphs): what users used to see, what they see now, row by row where the change has facets. Then one line beginning **What did not change:** — reviewers worry about scope, so say it. Screenshot Before/After tables go first in this section. |
-| **Bug fix** | `## What was wrong` · `## The fix` | Symptom as the user saw it, then the cause in one or two sentences. Then what changed and why *here* rather than somewhere else. If a related problem is deliberately left alone, it goes to *Worth knowing* with its ticket. |
+| **Bug fix** — any fix to a defect, error-tracker-driven included | `## What was wrong` · `## Summary` · `## Evidence` · `## Merge Danger` · `## Potential follow-ups` · `## Verify in production` | Shown and proved rather than told, for a reader who never opens the code and barely reads the PR. See *Bug fix sections* below. |
 | **Tiny** — config, membership, dependency bump, one-line copy | none | Lede and ticket line. Nothing else. |
 
 A refactor with no user-visible change is a *change to existing behavior* whose Before/After is about the code's shape, or *tiny* when the diff carries it. A performance change is a *change to existing behavior* whose Before/After table holds the measurements.
+
+### Bug fix sections
+
+The lede says what users saw go wrong and what they see now. After the ticket line come these sections, in this order. Write them as short bullets, tables, and visuals, never walls of text, in plain words at about a 10th-grade reading level; identifiers come after the plain words.
+
+1. **`## What was wrong`** — three to five bullets, one line each, no paragraphs:
+   - **What:** what broke, as a user saw it.
+   - **Where:** the page or endpoint, then the file and line that raised.
+   - **Cause:** one short sentence.
+   - **Who / how often:** the users or event count and the dates, from the error tracker or the ticket. Omit the bullet when no source gives numbers.
+   - **Since:** when the failing line arrived and by which change (`git log -S` or `git blame`), and whether this is a recent regression or latent. Omit the bullet when the history cannot be traced.
+2. **`## Summary`** — the smallest visual that shows the bug, with at most one sentence of text; the cause lives in *What was wrong*. It takes the spine's visual slot and replaces *How it works*.
+   - **Why this fix.** One sentence naming the obvious alternative and why this fix over it (a rescue over a non-bang save, a guard over a validation), when a reviewer would ask.
+   - **A diagram, always.** For a backend or logic fix, a diff sketch, call tree, or Mermaid flow of the path before and after. A diff sketch is pseudocode in diff form: name the function or view, keep only the lines that carry the point, mark changed lines `-` and `+`. A one-line fix needs only a three-line diff sketch.
+   - **A value table when the bug depends on input.** One row per input that matters — the values that broke and the nearest ones that did not — with *Before* and *After* columns.
+   - **Screenshots for a frontend diff**, and a video when one exists, per the *Evidence and visuals* rule in Step C.
+3. **`## Evidence`** — the proof, *Before* then *After*, next to each other. Show the test that reproduces the bug once, as given / when / then pseudocode.
+   - **Before:** the failing run — command, failure message, example count. Name the commit where it failed when the history has the test committed before the fix.
+   - **After:** the same test passing, with its command and count.
+
+   Only output the run produced or the caller supplied goes here. With no failing run, say so in one line; never write one. Other checks (lint, the wider suite) stay in the *Verification* collapsible.
+4. **`## Merge Danger`** — one line each:
+   - **Door:** `one-way` or `two-way`, and why. A two-way door reverts cleanly. A migration that rewrites data, a sent email, or any other external write is one-way.
+   - **Blast Radius:** one word (`tiny`, `small`, `wide`), then who or what the change touches.
+
+   Add ramifications below only when they are real: records the bug never hit that now behave differently, a caller that relied on the old result.
+5. **`## Potential follow-ups`** — what turned up while fixing this that the PR does not do. Take it from a caller's follow-ups list and from deferred work the conversation or plan names. Omit the section when there is none. Open with the line "Found while fixing this. None of it is in this PR." Then one table, most urgent first, every cell one short line:
+
+   | Column | Holds |
+   |---|---|
+   | **Urgency** | One of the three grades below, and no other word. |
+   | **Finding** | A bold headline of at most 8 words, in plain language. |
+   | **Where** | The file, or the page. |
+   | **Why it matters** | One sentence, no jargon. |
+   | **How sure** | `Confirmed in code` or `Suspected`. |
+   | **Next step** | A migration, a ticket (its number when one exists), a production count, or a spike. |
+
+   The urgency grades:
+   - **Do soon** — the same failure can still happen: the same cause in another place, or bad data still being written.
+   - **Plan it** — a related risk that needs a decision, a migration, or a production count first.
+   - **Nice to have** — cleanup; no failure expected.
+
+   At most five rows. When there are more, keep the five most urgent and add one line below the table saying how many were left out.
+6. **`## Verify in production`** — only when the failure depends on production data the run could not reproduce. One sentence says what could not be reproduced. Numbered steps follow for a person to run after deploy: the error tracker's issue link, the admin or record pages as root-relative links (`/admin/clients/<id>`), what each should show, and, last, watching the issue for new events before resolving it.
+
+The collapsibles follow. In a bug fix, *Merge Danger* owns the rollback, *Verify in production* owns the post-deploy checks, and *Potential follow-ups* replaces *Worth knowing*; a divergence from what was asked goes in *All decisions*. The *Post-deploy monitoring* collapsible holds only what those sections leave out, and is omitted when that is nothing.
 
 ### What goes in each collapsible
 
@@ -164,14 +210,14 @@ Before composing anything, build a compact internal **scope map** from the **com
 - One user-facing capability that did not exist → **New feature**.
 - Two or more user-facing capabilities, or a new subsystem with its own components → **Large feature**.
 - Existing behavior is different now (including copy, layout, a rule, a default, performance) → **Change to existing behavior**.
-- Something was broken and now is not → **Bug fix**. When a fix also adds a capability (a diagnostic tool, say), the fix is the type and the tool is a paragraph under *The fix*.
+- Something was broken and now is not → **Bug fix**. When a fix also adds a capability (a diagnostic tool, say), the fix is the type and the tool is a paragraph under *Summary*.
 - Config, membership, dependency bump, one-line copy, a mechanical rename → **Tiny**.
 
 Two material outcomes of different types share the lede, and the body uses the shape of the larger one. Subtract fix-up commits (review fixes, lint, rebase resolutions) — they are invisible to the reader.
 
 **Program altitude (multi-PR work).** After the PR-local scope map, check whether this PR sits inside a larger program — a multi-PR project, a series of dependent PRs, a multi-part plan. Judge from signals already in hand: the user's prompt and this conversation, a known plan path, an existing PR body, commit messages, sibling or series language in context. Do **not** invent a series, and do **not** run a repo-wide open-PR scan just for this step. When program context is present, the lede or a sentence right after it carries: the **program outcome** in one sentence, **this PR's contribution**, and its known **neighbors** — prior work landed and residual work still to come, each only when actually known. An early PR needs the lead-out; a middle one needs both; a late one needs the lead-in and says the arc completes when that is true. Omit either neighbor when unknown rather than guessing. When there is no program, write nothing about a series.
 
-**Evidence** is broader than screenshots and passing tests — benchmarks, API captures, migration exercises, logs, compatibility matrices, evals, manual probes, and rollout results all count — but a result leads the *Verification* collapsible only when it changes confidence in a material claim; its detail follows it inside the same collapsible, never inline in the visible body.
+**Evidence** is broader than screenshots and passing tests — benchmarks, API captures, migration exercises, logs, compatibility matrices, evals, manual probes, and rollout results all count — but a result leads the *Verification* collapsible only when it changes confidence in a material claim; its detail follows it inside the same collapsible, never inline in the visible body. A bug fix's before-and-after proof is the exception: it is the visible `## Evidence` section.
 
 ---
 
@@ -225,11 +271,11 @@ The ticket line is part 2 of the spine. Non-closing references that need their o
 
 ## Step C: Assemble the body
 
-When a project PR-body contract supplies headings or order, preserve that structure and place the applicable elements below within the sections it permits. Otherwise assemble the spine: lede → ticket line → visual → type section → `## How it works` (or `## How it fits together`) → `## Worth knowing` → non-closing related references when they need their own block → the four collapsibles (All decisions, In this PR, Verification, Post-deploy monitoring). Nothing after the last collapsible — see Step D.
+When a project PR-body contract supplies headings or order, preserve that structure and place the applicable elements below within the sections it permits. Otherwise assemble the spine: lede → ticket line → visual → type section → `## How it works` (or `## How it fits together`) → `## Worth knowing` → non-closing related references when they need their own block → the four collapsibles (All decisions, In this PR, Verification, Post-deploy monitoring). A bug fix puts its six sections (*Bug fix sections* above) between the ticket line and the collapsibles. Nothing after the last collapsible — see Step D.
 
-The lede is always a bare paragraph at the top — no `## Summary` heading, no label.
+The lede is always a bare paragraph at the top — no heading above it, no label. A bug fix's `## What was wrong` and `## Summary` come after it and never replace it.
 
-**Caller-supplied material.** An orchestrating caller hands over context: a plan summary, decisions and pivots, testing notes, review residuals, a monitoring section. This is source material, not a list of things to include. Route it: the *why* into the lede; decisions the reviewer would question into *How it works* as bold questions; every other decision, pivot, applied review finding, and residual into the *All decisions* collapsible as self-contained entries; the diff summary into *In this PR*; test results into *Verification* (the one-line results first, the detail below); the monitoring section into its collapsible. A decision a plan records becomes an *All decisions* entry stating what was decided and why, with no plan citation and no label. Point-in-time content: never an outstanding-items ledger, never updated after the PR opens — except the `Unapplied review findings` checkbox list, which is a ledger by design.
+**Caller-supplied material.** An orchestrating caller hands over context: a plan summary, decisions and pivots, testing notes, review residuals, a monitoring section. This is source material, not a list of things to include. Route it: the *why* into the lede; decisions the reviewer would question into *How it works* as bold questions; every other decision, pivot, applied review finding, and residual into the *All decisions* collapsible as self-contained entries; the diff summary into *In this PR*; test results into *Verification* (the one-line results first, the detail below), except a bug fix's before-and-after proof, which goes into *Evidence*; the monitoring section into its collapsible. A decision a plan records becomes an *All decisions* entry stating what was decided and why, with no plan citation and no label. Point-in-time content: never an outstanding-items ledger, never updated after the PR opens — except the `Unapplied review findings` checkbox list, which is a ledger by design.
 
 **Evidence and visuals:** a diff that touches frontend surfaces — views/templates (erb, haml, slim, jsx, tsx, vue, svelte), components, stylesheets, or UI JavaScript (e.g. Stimulus controllers) — should show the change; `references/compose.md` decides how visuals are obtained under the `visuals` setting. Placement is directly after the ticket line, or, inside a feature walk-through, at the step each one shows. Never under a `## Demo` or `## Screenshots` heading:
 
@@ -253,7 +299,7 @@ github.com switches with the viewer's theme; the mobile apps show the `<img>` fa
 
 When rewriting an existing body, preserve its existing visuals unless the user's focus asks to refresh them, and re-home any legacy `## Demo`/`## Screenshots` block content inline. Never label test output as a demo or screenshot.
 
-**Diagrams and tables:** reach for one when it conveys the change faster than prose — a component table for *How it fits together*, a flow or state diagram for a multi-step mechanism, a Before/After table for facets of a change, a measurements table for performance. Mermaid and markdown tables cover most shapes. Skip for tiny changes. Prose is authoritative when it conflicts with a visual.
+**Diagrams and tables:** reach for one when it conveys the change faster than prose — a component table for *How it fits together*, a flow or state diagram for a multi-step mechanism, a Before/After table for facets of a change, a measurements table for performance. Mermaid and markdown tables cover most shapes. Skip for tiny changes. A bug fix's *Summary* always carries one. Prose is authoritative when it conflicts with a visual.
 
 **GitHub gotchas:** never prefix list items with `#` (GitHub auto-links `#1` as an issue ref). Use `org/repo#123` or full URL for actual references. `<details>` blocks need a blank line after `<summary>` before markdown inside them renders.
 
@@ -274,7 +320,7 @@ Before returning the title and body, run two passes. Under `quick`, apply them t
 1. **Local-source leak.** Any match, case-insensitive, of: `docs/plans`, `docs/specs`, `the plan` (as a noun phrase: "the plan called for", "per the plan", "in the plan"), `brainstorm`, `\bUnit \d+` or `\bPhase \d+` used as a plan label, `\(as planned\)`, or a path to a local notes file. Rewrite each as self-contained content: state the decision and its reason with no reference to where it was recorded.
 2. **Attribution** (when `attribution=false`). Any line matching `Generated with`, `Co-Authored-By`, a robot emoji, or a link to an AI vendor's site. Delete the line.
 2a. **Emoji.** Any emoji outside a code span or a quoted string. Delete it.
-3. **Legacy shape.** A `## Summary` heading, a `TL;DR` string, a `## Demo`/`## Screenshots` heading, a `## Staging evidence` block, or a top-level `## In this PR`, `## Verification`, `## Verified`, or `## Post-Deploy Monitoring` heading. Those four belong inside their collapsibles; the rest re-home into the spine.
+3. **Legacy shape.** A `## Summary` heading outside a bug fix, a `TL;DR` string, a `## Demo`/`## Screenshots` heading, a `## Staging evidence` block, a `## Follow-ups` heading or a `> [!NOTE]` follow-ups callout (a bug fix's follow-ups are the `## Potential follow-ups` table), or a top-level `## In this PR`, `## Verification`, `## Verified`, or `## Post-Deploy Monitoring` heading. Those four belong inside their collapsibles; the rest re-home into the spine.
 4. **Bold glossary.** Three or more bolded phrases in one paragraph that are domain terms rather than labels. Unbold; gloss the first use if the reader needs it.
 5. **Walls of text.** Any paragraph over four sentences, or any sentence over about 25 words, outside a table or code block. Split the paragraph or turn it into a list; split the sentence.
 6. **Enumerating prose.** A sentence or run of sentences whose clauses each open with a different named subject doing parallel work ("Step A …, Step C …, Step E …"; "`parser.py` …, `loader.py` …, `writer.py` …"). Turn it into a list with the names as bold lead-ins.
@@ -282,7 +328,7 @@ Before returning the title and body, run two passes. Under `quick`, apply them t
 **Judgment pass** — check against the scope map and revise if any answer is wrong:
 
 - Can a reader stop after the lede and know what changed for users? After the type section and know what they would see? After *How it works* and review the code? If any layer is incomplete on its own, fill it; if any layer restates the one above, cut it.
-- Is the type right for the map, and does the type section have that type's shape (walk-through / per-capability `###` / Before-After + what did not change / what was wrong + the fix / nothing)?
+- Is the type right for the map, and does the type section have that type's shape (walk-through / per-capability `###` / Before-After + what did not change / What was wrong bullets + a Summary that is a visual with at most one sentence + Evidence + Merge Danger / nothing)?
 - Does the lede name a mechanism where an outcome belongs — "switches the resolver to a queue" rather than "stops duplicate notifications"? Audit the scope map, not just the sentence: a mechanism-shaped map produces a mechanism-shaped lede that reads fine. Restate the umbrella as what changes for someone using the software, then rewrite title and lede from it.
 - Is a coequal outcome demoted into an aside — "also surfaced", "and while there", a trailing clause — when the map lists it as material? Two material outcomes share the lede; "also" is for supporting work only.
 - When this PR sits in a known program, does the lede carry program altitude — the program outcome, this PR's contribution, and each known neighbor? Is any series claimed that was not in evidence?
@@ -291,7 +337,7 @@ Before returning the title and body, run two passes. Under `quick`, apply them t
 - Does every sentence pass `noslop`'s tests — mechanism over feeling, actor named, one idea, decision first, and a reader without the code open can act on it? Are identifiers, paths, error text, and thresholds kept verbatim where they are the claim?
 - Does the body narrate process — reviewer counts, passes, what was tried first — anywhere outside an *All decisions* entry that states a pivot as a decision? Cut it.
 - Does *Verification* open with results rather than "tests passed", with its detail below rather than inline in the visible body?
-- Does *All decisions* carry every decision the reviewer might question that *How it works* does not, and does *Worth knowing* carry every follow-up with its ticket?
+- Does *All decisions* carry every decision the reviewer might question that *How it works* does not, and does *Worth knowing* carry every follow-up with its ticket? In a bug fix, does *Potential follow-ups* grade each row with only *Do soon*, *Plan it*, or *Nice to have*, most urgent first, at most five rows?
 - Is every term grounded before a sentence leans on it — glossed in the lede or an earlier paragraph, never three sections later?
 - Is the body sized to the change rather than the session? A tiny change with a long *All decisions* collapsible is a sign the session leaked; keep only decisions that concern what shipped.
 - Can any sentence be cut without lowering a reader's confidence or understanding at its layer? Cut it — except headings, fields, checklists, or boilerplate the project's PR-body contract requires. Attribution is never protected content.

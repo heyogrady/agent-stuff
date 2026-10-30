@@ -53,7 +53,7 @@ Plain-language requests map the same way: "write a PR description" is `describe-
 
 ## Step 3: Compose the title and body
 
-**Read `references/compose.md`, then `references/pr-description-writing.md` in full**, with the matching example from `references/pr-description-examples.md`. Before writing: decide the ticket line (Linear MCP, then `linctl`, then the plain ID from the branch; GitHub `Fixes #N` when it fully resolves an issue), read any plan for the why, and decide visuals. Compose in `noslop`'s author mode. Step E of the writing reference is the audit before anything is shown or applied.
+**Read `references/compose.md`, then `references/pr-description-writing.md` in full**, with the matching example from `references/pr-description-examples.md`. Before writing: decide the ticket line (Linear MCP, then `linctl`, then the plain ID from the branch; GitHub `Fixes #N` when it fully resolves an issue), read any plan for the why, and decide visuals. A defect fix takes the writing reference's Bug fix shape, fed by a caller's follow-ups list and any production-verification facts. Compose in `noslop`'s author mode. Step E of the writing reference is the audit before anything is shown or applied.
 
 Read the full diff, never just the commit messages. Never invent the why: when the prompt, ticket, plan, and conversation do not carry it, ask (in `mode:pipeline`, state what changed and leave the motivation out).
 

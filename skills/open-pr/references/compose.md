@@ -12,7 +12,7 @@ Load `noslop` (resolve the name against the host's available-skills list; it may
 
 Gather the ticket ID before composing:
 
-1. **Find it.** Look in the branch name, the commit messages, and the user's prompt. Match `[A-Za-z]{2,10}-[0-9]+` case-insensitively and upper-case it (`proj-123` becomes `PROJ-123`). Skip conventional type words that happen to match (`feat-2`, `fix-12`, `release-3`). No match means no Linear-style ticket.
+1. **Find it.** Look in the branch name, the commit messages, and the user's prompt. Match `[A-Za-z]{2,10}-[0-9]+` case-insensitively and upper-case it (`proj-123` becomes `PROJ-123`). Skip conventional type words that happen to match (`feat-2`, `fix-12`, `release-3`), and a match followed directly by a letter (`WEB-4F`): that is an error-tracker short ID, below. No match means no Linear-style ticket.
 2. **Look it up**, first source that works:
    - **Linear MCP.** A tool from a Linear MCP server that fetches one issue (named like `get_issue`; match by capability). Read the URL, the parent, and the sub-issues.
    - **`linctl` CLI**, when it is on `PATH`: `linctl issue get <ID> --json`.
@@ -27,6 +27,8 @@ Gather the ticket ID before composing:
 Render `Resolves [PROJ-123](url)` or `Part of [PROJ-123](url)` on its own line directly after the lede. Never block on the tracker.
 
 **GitHub issues** follow Step B1 of the writing reference: an issue number in the branch (`123-fix-login`, `issue-123`), the commits, or the prompt is a candidate. Use `Fixes #123` only when the PR targets the default branch and fully resolves it; otherwise `Related: #123`. A repo can carry both a Linear line and a GitHub reference.
+
+**Error-tracker issues.** A short ID from Sentry or a similar tracker, in the branch or prompt (`WEB-4F`, letters after the digits), or one the caller names, gets its own line after any ticket line: `Related: Sentry [WEB-4F](<issue url>)`, the plain ID when no URL is known. Use a closing form only when the project documents one. The body is a Bug fix.
 
 ## Plan context
 
